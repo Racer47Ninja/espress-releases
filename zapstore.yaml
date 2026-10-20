@@ -1,0 +1,49 @@
+# Espress on Zapstore — the listing (zsp / zapstore-publish schema, read 2026-10-20).
+#
+# This file lives at the ROOT of the public releases repo (espress-releases): the relay
+# fetches it from there on the first publish and checks that `pubkey` is the key that
+# signed the events. This copy in espress-app is the source; the one in the public repo
+# is what counts. Guide: store/zapstore/README.md.
+
+# The public repo that holds the releases (the APK is the newest asset matching `match`).
+repository: https://github.com/Racer47Ninja/espress-releases
+
+# Espress's Nostr public key: the SIGNER's npub (what nsec.app shows), not a bunker client key.
+# Required here because signing goes through a bunker (the action cannot inject it), and the
+# action refuses to run — even `check` — while this placeholder is in place. So the identity
+# comes first, then the first check.
+pubkey: npub1zr963zzys0xqrlpgren002a0zdds0t426xlz5gcy6d6x6qca9xqqfpqa0z
+
+# Only ever pick the release APK, never a stray file. EAS names its artifact
+# application-<hash>.apk; it is renamed to espress-v<version>-<versionCode>.apk on upload.
+match: "^espress-v.*\\.apk$"
+
+name: Espress
+
+# The listing copy, designed in batch 62 (README §Batch 62 §5; `zs_summary` / `zs_desc` in
+# i18n.js, eleven languages). Zapstore shows one language today, so EN ships; the other ten
+# are in the app's i18n table for when it shows more.
+summary: "Scan any bag of coffee: rating, flavor, origin. Paid in sats."
+description: |
+  Point your phone at a bag of coffee and Espress tells you what is in it: the rating, the flavor, the origin and the roast, with reviews from people who drank it.
+
+  The first seven days are free, with everything unlocked and nothing to pay. After that, scanning continues with a plan paid on the web, in bitcoin: $25.50 for a year, or $3 a month charged from your own Lightning node over Nostr Wallet Connect. The app itself sells nothing.
+
+  Your history, ratings and saved coffees are never locked, paid or not.
+
+website: https://espress.coffee
+
+tags:
+  - coffee
+  - food
+
+# The app icon (app/assets/icon.png, 1024×1024). Icons are not read from the APK. The action
+# reads this path from the runner's working directory (the repo root), so icon.png sits next
+# to this file at the root; zsp would resolve it relative to the YAML and downscale to 512 wide.
+icon: ./icon.png
+
+# images: — omitted on purpose. Screenshots must be of the Android app on a real device;
+# none exist until the phone arrives. Omitted beats invented.
+
+# license: — omitted. The LICENSE in espress-app is the Expo template's (650 Industries, MIT),
+# not a decision of Erik's. Decide before publishing: an SPDX id or leave it out.
