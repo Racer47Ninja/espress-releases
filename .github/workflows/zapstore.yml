@@ -1,0 +1,62 @@
+# Espress → Zapstore. This file is a TEMPLATE: it runs in the PUBLIC releases repo
+# (espress-releases), at .github/workflows/zapstore.yml — never here, espress-app is private
+# and has no APK. Copy it there as is. Guide: store/zapstore/README.md.
+#
+# Two triggers, on purpose:
+#   · a published GitHub release only CHECKS (resolves the APK, reads its certificate,
+#     validates zapstore.yaml; no credential, no upload, nothing reaches the relay);
+#   · publishing is a manual run (Actions → Zapstore → Run workflow → mode=publish), the
+#     day the APK has been run on a real Android. Nothing ships by accident.
+#
+# The action is a TypeScript reimplementation of `zsp` (no binary). Signing uses a NIP-46
+# bunker URL kept as the repo secret ZAPSTORE_SIGN_WITH: the Nostr key never leaves the
+# signer. With a bunker, zapstore.yaml MUST carry `pubkey` itself (the action cannot inject
+# it), and the action fails on the REPLACE_WITH_ placeholder even in check mode.
+#
+# Pinned to the commit behind tag v1.0.5 (= floating v1 on 2026-10-20): a one-person action
+# that holds a signing credential is pinned by SHA, not by a tag someone can move.
+
+name: Zapstore
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check (validate only) · sign (prove the key, publish nothing) · publish"
+        type: choice
+        options: [check, sign, publish]
+        default: check
+      apk:
+        description: "Only with mode=check: https URL of an APK to validate before any release exists (e.g. the EAS build artifact)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  zapstore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # An arbitrary URL is fine to CHECK; it must never be what gets SIGNED or PUBLISHED.
+      - name: Refuse a custom APK outside check mode
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.apk != '' && inputs.mode != 'check' }}
+        run: |
+          echo "The apk input is only allowed with mode=check. Publish from the release asset." >&2
+          exit 1
+
+      - name: Check, sign or publish
+        uses: rossigee/zapstore-publish@1f201ed351cc0f0e1bc78da79e1cf2222c86027e # v1.0.5
+        env:
+          # Lets the action read the releases through the API without hitting the anonymous rate limit.
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          config: zapstore.yaml
+          mode: ${{ github.event_name == 'release' && 'check' || inputs.mode }}
+          apk: ${{ inputs.apk }}
+          # Only read in sign/publish; check needs no identity at all.
+          sign-with: ${{ (inputs.mode == 'sign' || inputs.mode == 'publish') && secrets.ZAPSTORE_SIGN_WITH || '' }}
