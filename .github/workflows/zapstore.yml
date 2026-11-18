@@ -15,6 +15,11 @@
 #
 # Pinned to the commit behind tag v1.0.5 (= floating v1 on 2026-10-20): a one-person action
 # that holds a signing credential is pinned by SHA, not by a tag someone can move.
+#
+# mode=proof (2026-11-17) sends the NIP-C1 proof, which the action cannot make: without it
+# Zapstore keeps a new developer's listing pending and deletes it after 5 h. So it runs AFTER a
+# publish, within those 5 h. Its certificate half is signed on Erik's Mac by
+# store/zapstore/c1-proof.mjs (espress-app); the keystore never comes here.
 
 name: Zapstore
 
@@ -24,12 +29,16 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check (validate only) · sign (prove the key, publish nothing) · publish"
+        description: "check (validate only) · sign (prove the key, publish nothing) · publish · proof (NIP-C1, after a publish)"
         type: choice
-        options: [check, sign, publish]
+        options: [check, sign, publish, proof]
         default: check
       apk:
         description: "Only with mode=check: https URL of an APK to validate before any release exists (e.g. the EAS build artifact)"
+        type: string
+        default: ""
+      proof:
+        description: "Only with mode=proof: the one-line JSON that c1-proof.mjs printed"
         type: string
         default: ""
 
@@ -40,7 +49,12 @@ jobs:
   zapstore:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Not in proof mode: that step needs no file from the repo, and it holds the bunker URL.
+      # Pinned by SHA; persist-credentials: false keeps GITHUB_TOKEN out of .git/config.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: ${{ github.event_name == 'release' || inputs.mode != 'proof' }}
+        with:
+          persist-credentials: false
 
       # An arbitrary URL is fine to CHECK; it must never be what gets SIGNED or PUBLISHED.
       - name: Refuse a custom APK outside check mode
@@ -49,7 +63,14 @@ jobs:
           echo "The apk input is only allowed with mode=check. Publish from the release asset." >&2
           exit 1
 
+      - name: Refuse a proof outside proof mode
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.proof != '' && inputs.mode != 'proof' }}
+        run: |
+          echo "The proof input is only allowed with mode=proof." >&2
+          exit 1
+
       - name: Check, sign or publish
+        if: ${{ github.event_name == 'release' || inputs.mode != 'proof' }}
         uses: rossigee/zapstore-publish@1f201ed351cc0f0e1bc78da79e1cf2222c86027e # v1.0.5
         env:
           # Lets the action read the releases through the API without hitting the anonymous rate limit.
@@ -60,3 +81,69 @@ jobs:
           apk: ${{ inputs.apk }}
           # Only read in sign/publish; check needs no identity at all.
           sign-with: ${{ (inputs.mode == 'sign' || inputs.mode == 'publish') && secrets.ZAPSTORE_SIGN_WITH || '' }}
+
+      # NIP-C1 (README §6): check the line c1-proof.mjs printed, have the bunker sign the kind
+      # 30509 event with Espress's Nostr key (approve it in Amber), check the result, send it,
+      # and wait until Zapstore actually lists Espress: a green run means listed, not "sent".
+      # nak = fiatjaf's Nostr CLI, pinned by version and SHA-256: v0.20.7 (2026-09-16), two months
+      # out on 2026-11-17, same signing/stdin behaviour as v0.22.2 (three-lens review, 2026-11-17).
+      - name: Sign and send the NIP-C1 proof
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'proof' }}
+        timeout-minutes: 25
+        env:
+          PROOF: ${{ inputs.proof }}
+          SIGN_WITH: ${{ secrets.ZAPSTORE_SIGN_WITH }}
+          CERT_SHA256: a7521a6a632d71ca6d666834f904f06f761365016f7072f8d5572e71cf5f6dbd
+          ESPRESS_PUBKEY: 10cba8884483cc01fc281e66f7abaf135b07aeaad1be2a2304d3746d031d2980
+          NAK_URL: https://github.com/fiatjaf/nak/releases/download/v0.20.7/nak-v0.20.7-linux-amd64
+          NAK_SHA256: ba918fafd1b030bc50958a5b218c6386f4c3a57c1e469562d3947e858e0ba56e
+          RELAY: wss://relay.zapstore.dev
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/c1"
+          mkdir -p "$work"
+          printf '%s\n' "$PROOF" > "$work/proof.json"
+          # 1. Exactly ONE unsigned kind 30509 for Espress's certificate: four fields, three tags.
+          #    (-s: two JSON values in a row would otherwise pass on the last one alone.)
+          jq -e -s --arg d "$CERT_SHA256" --argjson now "$(date +%s)" '
+            length == 1 and (.[0] |
+              (keys == ["content", "created_at", "kind", "tags"])
+              and .kind == 30509 and .content == ""
+              and (.created_at | type == "number") and .created_at <= $now + 600
+              and (.tags | length == 3)
+              and .tags[0] == ["d", $d]
+              and (.tags[1] | length == 2 and .[0] == "signature" and (.[1] | test("^[A-Za-z0-9+/]+={0,2}$")))
+              and (.tags[2] | length == 2 and .[0] == "expiry" and (.[1] | test("^[0-9]+$")))
+              and ((.tags[2][1] | tonumber) > .created_at))
+          ' "$work/proof.json" > /dev/null || { echo "The proof input is not the line c1-proof.mjs printed." >&2; exit 1; }
+          # 2. nak, only if its checksum matches.
+          curl -fsSL -o "$work/nak" "$NAK_URL"
+          echo "$NAK_SHA256  $work/nak" | sha256sum -c -
+          chmod +x "$work/nak"
+          # 3. The bunker signs (approve it in Amber: one request, kind 30509). Nothing is sent
+          #    yet. The bunker URL goes in nak's own env var for this one command, not in argv.
+          NOSTR_SECRET_KEY="$SIGN_WITH" "$work/nak" event < "$work/proof.json" > "$work/signed.json"
+          # 4. Exactly one event, signed by Espress's key, and unchanged.
+          jq -e -s --arg pk "$ESPRESS_PUBKEY" --slurpfile p "$work/proof.json" '
+            length == 1 and (.[0] |
+              .pubkey == $pk and .kind == $p[0].kind and .created_at == $p[0].created_at
+              and .tags == $p[0].tags and .content == "")
+          ' "$work/signed.json" > /dev/null || { echo "The signed event is not Espress's, or it changed." >&2; exit 1; }
+          cat "$work/signed.json"
+          # 5. Send it. nak prints "success." for any OK true, including a proof the relay keeps
+          #    pending; a refusal prints the relay's reason and fails the step.
+          "$work/nak" event "$RELAY" < "$work/signed.json"
+          # 6. Wait for the listing. A pending listing is not served, so this polls the app event
+          #    (kind 32267) for 10 minutes. Re-sending the same signed proof every 3 minutes
+          #    changes nothing on the relay but shows a refusal the relay decided later.
+          for i in $(seq 1 10); do
+            sleep 60
+            if "$work/nak" req -k 32267 -a "$ESPRESS_PUBKEY" -l 1 "$RELAY" | grep -qE '"kind": ?32267'; then
+              echo "Espress is listed on Zapstore."
+              exit 0
+            fi
+            echo "Not listed yet ($i/10)."
+            if [ $((i % 3)) -eq 0 ]; then "$work/nak" event "$RELAY" < "$work/signed.json" || true; fi
+          done
+          echo "Sent, but Espress is not listed after 10 minutes. Check again later; a refusal would have printed above." >&2
+          exit 1
