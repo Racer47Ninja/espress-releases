@@ -42,8 +42,18 @@ tags:
 # to this file at the root; zsp would resolve it relative to the YAML and downscale to 512 wide.
 icon: ./icon.png
 
-# images: — omitted on purpose. Screenshots must be of the Android app on a real device;
-# none exist until the phone arrives. Omitted beats invented.
+# Screenshots: build 4 (versionCode 4) on the Galaxy A16, 1080×2340, taken on the device on
+# 2026-11-17 and stripped of EXIF without re-encoding. The action reads each path from the
+# repo root (like the icon) and uploads it to Blossom, so in espress-releases the folder
+# `screenshots/` sits at the root, next to this file. Order is the listing order.
+images:
+  - ./screenshots/01-home.jpg
+  - ./screenshots/02-coffee.jpg
+  - ./screenshots/03-facts.jpg
+  - ./screenshots/04-search.jpg
+  - ./screenshots/05-saved.jpg
+  - ./screenshots/06-profile.jpg
 
-# license: — omitted. The LICENSE in espress-app is the Expo template's (650 Industries, MIT),
-# not a decision of Erik's. Decide before publishing: an SPDX id or leave it out.
+# license: — omitted on purpose (Erik, 2026-11-17). The app is not open source, and the only
+# LICENSE in espress-app is the Expo template's (650 Industries, MIT), not a decision of his.
+# The listing is a replaceable event: a licence can be added in any later publish.
