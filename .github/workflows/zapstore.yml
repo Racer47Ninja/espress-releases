@@ -20,6 +20,9 @@
 # Zapstore keeps a new developer's listing pending and deletes it after 5 h. So it runs AFTER a
 # publish, within those 5 h. Its certificate half is signed on Erik's Mac by
 # store/zapstore/c1-proof.mjs (espress-app); the keystore never comes here.
+#
+# mode=profile (2026-11-18) publishes Espress's Nostr profile (kind 0) from profile.json, so
+# Zapstore shows "Espress" and the logo next to the app instead of the npub.
 
 name: Zapstore
 
@@ -29,9 +32,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check (validate only) · sign (prove the key, publish nothing) · publish · proof (NIP-C1, after a publish)"
+        description: "check (validate only) · sign (prove the key, publish nothing) · publish · proof (NIP-C1, after a publish) · profile (name and logo, from profile.json)"
         type: choice
-        options: [check, sign, publish, proof]
+        options: [check, sign, publish, proof, profile]
         default: check
       apk:
         description: "Only with mode=check: https URL of an APK to validate before any release exists (e.g. the EAS build artifact)"
@@ -69,8 +72,9 @@ jobs:
           echo "The proof input is only allowed with mode=proof." >&2
           exit 1
 
+      # Only the action's own three modes reach the action (a closed list, not "anything but").
       - name: Check, sign or publish
-        if: ${{ github.event_name == 'release' || inputs.mode != 'proof' }}
+        if: ${{ github.event_name == 'release' || contains(fromJSON('["check", "sign", "publish"]'), inputs.mode) }}
         uses: rossigee/zapstore-publish@1f201ed351cc0f0e1bc78da79e1cf2222c86027e # v1.0.5
         env:
           # Lets the action read the releases through the API without hitting the anonymous rate limit.
@@ -146,4 +150,64 @@ jobs:
             if [ $((i % 3)) -eq 0 ]; then "$work/nak" event "$RELAY" < "$work/signed.json" || true; fi
           done
           echo "Sent, but Espress is not listed after 10 minutes. Check again later; a refusal would have printed above." >&2
+          exit 1
+
+      # The developer profile Zapstore shows next to the app: a kind 0 built from profile.json,
+      # signed through the bunker (approve it in Amber: one request, kind 0), sent to the
+      # catalog relay (which keeps the newest kind 0 per key and ships it to phones) and to the
+      # relays profiles are looked up on. profile.json reuses what is already designed and live:
+      # the brand name, espress.coffee's favicon and share image, the listing's summary.
+      - name: Sign and send the Nostr profile
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'profile' }}
+        timeout-minutes: 20
+        env:
+          SIGN_WITH: ${{ secrets.ZAPSTORE_SIGN_WITH }}
+          ESPRESS_PUBKEY: 10cba8884483cc01fc281e66f7abaf135b07aeaad1be2a2304d3746d031d2980
+          NAK_URL: https://github.com/fiatjaf/nak/releases/download/v0.20.7/nak-v0.20.7-linux-amd64
+          NAK_SHA256: ba918fafd1b030bc50958a5b218c6386f4c3a57c1e469562d3947e858e0ba56e
+          CATALOG_RELAY: wss://relay.zapstore.dev
+          # relay.vertexlab.io is where Zapstore's relay looks profiles up (RELAY_PROFILE_RELAYS);
+          # the rest are where Nostr clients usually look.
+          PROFILE_RELAYS: wss://relay.vertexlab.io wss://purplepag.es wss://nos.lol wss://relay.damus.io wss://relay.primal.net
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/profile"
+          mkdir -p "$work"
+          # 1. profile.json: one object, only these fields, all strings, a name, https links.
+          jq -e -s '
+            length == 1 and (.[0] |
+              type == "object"
+              and ((keys - ["about", "banner", "display_name", "name", "picture", "website"]) | length == 0)
+              and all(.[]; type == "string")
+              and (.name | type == "string" and length > 0)
+              and all(.picture, .banner, .website | select(. != null); startswith("https://")))
+          ' profile.json > /dev/null || { echo "profile.json is not the expected profile." >&2; exit 1; }
+          jq -c -n --arg content "$(jq -c . profile.json)" --argjson now "$(date +%s)" \
+            '{kind: 0, created_at: $now, tags: [], content: $content}' > "$work/event.json"
+          # 2. nak, only if its checksum matches.
+          curl -fsSL -o "$work/nak" "$NAK_URL"
+          echo "$NAK_SHA256  $work/nak" | sha256sum -c -
+          chmod +x "$work/nak"
+          # 3. The bunker signs. Nothing is sent yet.
+          NOSTR_SECRET_KEY="$SIGN_WITH" "$work/nak" event < "$work/event.json" > "$work/signed.json"
+          # 4. Exactly one kind 0, signed by Espress's key, with profile.json as its content.
+          jq -e -s --arg pk "$ESPRESS_PUBKEY" --slurpfile p "$work/event.json" '
+            length == 1 and (.[0] |
+              .pubkey == $pk and .kind == 0 and .content == $p[0].content and .tags == [])
+          ' "$work/signed.json" > /dev/null || { echo "The signed profile is not Espress's, or it changed." >&2; exit 1; }
+          cat "$work/signed.json"
+          # 5. Send it: the catalog relay must take it; the others are best effort.
+          "$work/nak" event "$CATALOG_RELAY" < "$work/signed.json"
+          # shellcheck disable=SC2086
+          "$work/nak" event $PROFILE_RELAYS < "$work/signed.json" || echo "No other relay took it; Zapstore has it anyway." >&2
+          # 6. Zapstore serves it. Phones show it after their next catalog sync.
+          id=$(jq -r .id "$work/signed.json")
+          for i in $(seq 1 6); do
+            if "$work/nak" req -k 0 -a "$ESPRESS_PUBKEY" -l 1 "$CATALOG_RELAY" | grep -q "$id"; then
+              echo "Zapstore serves the new profile."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Sent, but Zapstore does not serve the new profile yet." >&2
           exit 1
