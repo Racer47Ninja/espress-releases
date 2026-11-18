@@ -43,7 +43,9 @@ tags:
 icon: ./icon.png
 
 # Screenshots: build 4 (versionCode 4) on the Galaxy A16, 1080×2340, taken on the device on
-# 2026-11-17 and stripped of EXIF without re-encoding. The action reads each path from the
+# 2026-11-17, EXIF stripped. Zapstore's CDN refuses images over 500,000 bytes (zapstore/relay
+# pkg/blossom/blossom.go, maxImageBytes): 02 and 04 are re-encoded at JPEG q90/q92 to fit; the
+# other four are the device's bytes. Keep every image under ~480 KB. The action reads each path from the
 # repo root (like the icon) and uploads it to Blossom, so in espress-releases the folder
 # `screenshots/` sits at the root, next to this file. Order is the listing order.
 images:
