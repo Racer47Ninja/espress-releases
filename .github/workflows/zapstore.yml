@@ -173,14 +173,16 @@ jobs:
           set -euo pipefail
           work="$RUNNER_TEMP/profile"
           mkdir -p "$work"
-          # 1. profile.json: one object, only these fields, all strings, a name, https links.
+          # 1. profile.json: one object, only these fields, all strings, a name, https links,
+          #    and lud16 (the Lightning Address "Zap this app" pays to, 2026-11-18) shaped user@domain.
           jq -e -s '
             length == 1 and (.[0] |
               type == "object"
-              and ((keys - ["about", "banner", "display_name", "name", "picture", "website"]) | length == 0)
+              and ((keys - ["about", "banner", "display_name", "lud16", "name", "picture", "website"]) | length == 0)
               and all(.[]; type == "string")
               and (.name | type == "string" and length > 0)
-              and all(.picture, .banner, .website | select(. != null); startswith("https://")))
+              and all(.picture, .banner, .website | select(. != null); startswith("https://"))
+              and ((.lud16 // null) | . == null or test("^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\\.[A-Za-z]+$")))
           ' profile.json > /dev/null || { echo "profile.json is not the expected profile." >&2; exit 1; }
           jq -c -n --arg content "$(jq -c . profile.json)" --argjson now "$(date +%s)" \
             '{kind: 0, created_at: $now, tags: [], content: $content}' > "$work/event.json"

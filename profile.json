@@ -4,5 +4,6 @@
   "about": "Scan any bag of coffee: rating, flavor, origin. Paid in sats.",
   "picture": "https://espress.coffee/assets/favicon.png",
   "banner": "https://espress.coffee/assets/og/espress-og-generic.png",
-  "website": "https://espress.coffee"
+  "website": "https://espress.coffee",
+  "lud16": "espress@espress.coffee"
 }
