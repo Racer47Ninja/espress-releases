@@ -1,7 +1,7 @@
 {
   "name": "Espress app",
   "display_name": "Espress app",
-  "about": "Scan any bag of coffee: rating, flavor, origin. Paid in sats. Notes and conversation: nostr:npub196fpdhpqyf88gf8appz5f7yemkwqejnd9plv6fc59pd5ytmj85dqfltu0l",
+  "about": "Scan any bag of coffee: rating, flavor, origin. Paid in sats. Notes: nostr:npub196fpdhpqyf88gf8appz5f7yemkwqejnd9plv6fc59pd5ytmj85dqfltu0l",
   "nip05": "app@espress.coffee",
   "picture": "https://espress.coffee/assets/cup-on-red.png",
   "banner": "https://espress.coffee/assets/banner-red-stack-2.png",
